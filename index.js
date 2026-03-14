@@ -20,49 +20,45 @@ const anthropic = new Anthropic({
 const REDIS_URL = process.env.KV_REST_API_URL;
 const REDIS_TOKEN = process.env.KV_REST_API_TOKEN;
 
-async function redisGet(key) {
+async function redisCmd(...args) {
   try {
-    const res = await fetch(`${REDIS_URL}/get/${encodeURIComponent(key)}`, {
-      headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
-    });
-    const data = await res.json();
-    if (!data.result) return null;
-    return JSON.parse(data.result);
-  } catch (e) {
-    console.error('redisGet error:', e);
-    return null;
-  }
-}
-
-async function redisSet(key, value) {
-  try {
-    const encoded = encodeURIComponent(key);
-    const jsonStr = JSON.stringify(value);
-    await fetch(`${REDIS_URL}/set/${encoded}`, {
+    const res = await fetch(REDIS_URL, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${REDIS_TOKEN}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(jsonStr),
+      body: JSON.stringify(args),
     });
+    const data = await res.json();
+    return data.result;
   } catch (e) {
-    console.error('redisSet error:', e);
+    console.error('redisCmd error:', e);
+    return null;
   }
 }
 
+async function redisGet(key) {
+  const result = await redisCmd('GET', key);
+  if (!result) return null;
+  try {
+    return JSON.parse(result);
+  } catch {
+    return null;
+  }
+}
+
+async function redisSet(key, value) {
+  await redisCmd('SET', key, JSON.stringify(value));
+}
+
 async function redisSmembers(key) {
-  const res = await fetch(`${REDIS_URL}/smembers/${key}`, {
-    headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
-  });
-  const data = await res.json();
-  return data.result || [];
+  const result = await redisCmd('SMEMBERS', key);
+  return result || [];
 }
 
 async function redisSadd(key, value) {
-  await fetch(`${REDIS_URL}/sadd/${key}/${value}`, {
-    headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
-  });
+  await redisCmd('SADD', key, value);
 }
 
 const IMUTA_PROMPT = `【最重要ルール・絶対に守ること】

@@ -22,13 +22,18 @@ const REDIS_TOKEN = process.env.KV_REST_API_TOKEN;
 
 async function redisGet(key) {
   try {
-    const res = await fetch(`${REDIS_URL}/get/${key}`, {
-      headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
+    const res = await fetch(`${REDIS_URL}/pipeline`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${REDIS_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify([['GET', key]]),
     });
-    const text = await res.text();
-    const data = JSON.parse(text);
-    if (!data.result) return [];
-    const parsed = JSON.parse(data.result);
+    const data = await res.json();
+    const result = data[0]?.result;
+    if (!result) return [];
+    const parsed = JSON.parse(result);
     return Array.isArray(parsed) ? parsed : [];
   } catch (e) {
     console.error('redisGet error:', e);
@@ -39,16 +44,14 @@ async function redisGet(key) {
 async function redisSet(key, value) {
   try {
     const serialized = JSON.stringify(value);
-    const res = await fetch(`${REDIS_URL}/set/${key}`, {
+    await fetch(`${REDIS_URL}/pipeline`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${REDIS_TOKEN}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(serialized),
+      body: JSON.stringify([['SET', key, serialized]]),
     });
-    const data = await res.json();
-    console.log('redisSet result:', data.result);
   } catch (e) {
     console.error('redisSet error:', e);
   }

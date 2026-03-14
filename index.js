@@ -20,149 +20,100 @@ const anthropic = new Anthropic({
 const REDIS_URL = process.env.KV_REST_API_URL;
 const REDIS_TOKEN = process.env.KV_REST_API_TOKEN;
 
-async function redisCmd(...args) {
+async function redisGet(key) {
   try {
-    const res = await fetch(REDIS_URL, {
+    const res = await fetch(`${REDIS_URL}/get/${encodeURIComponent(key)}`, {
+      headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
+    });
+    const data = await res.json();
+    if (!data.result) return [];
+    const parsed = JSON.parse(data.result);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    console.error('redisGet error:', e);
+    return [];
+  }
+}
+
+async function redisSet(key, value) {
+  try {
+    const encoded = encodeURIComponent(key);
+    const body = JSON.stringify(JSON.stringify(value));
+    await fetch(`${REDIS_URL}/set/${encoded}`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${REDIS_TOKEN}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(args),
+      body,
     });
-    const data = await res.json();
-    return data.result;
   } catch (e) {
-    console.error('redisCmd error:', e);
-    return null;
+    console.error('redisSet error:', e);
   }
-}
-
-async function redisGet(key) {
-  const result = await redisCmd('GET', key);
-  if (!result) return null;
-  try {
-    return JSON.parse(result);
-  } catch {
-    return null;
-  }
-}
-
-async function redisSet(key, value) {
-  await redisCmd('SET', key, JSON.stringify(value));
-}
-
-async function redisSmembers(key) {
-  const result = await redisCmd('SMEMBERS', key);
-  return result || [];
 }
 
 async function redisSadd(key, value) {
-  await redisCmd('SADD', key, value);
+  try {
+    await fetch(`${REDIS_URL}/sadd/${key}/${value}`, {
+      headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
+    });
+  } catch (e) {
+    console.error('redisSadd error:', e);
+  }
+}
+
+async function redisSmembers(key) {
+  try {
+    const res = await fetch(`${REDIS_URL}/smembers/${key}`, {
+      headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
+    });
+    const data = await res.json();
+    return data.result || [];
+  } catch (e) {
+    return [];
+  }
 }
 
 const IMUTA_PROMPT = `【最重要ルール・絶対に守ること】
-① カッコや記号で動作を書くな。（〜しながら）も*〜しながら*も絶対禁止。
-② 質問で終わるな。ただ受け取れ。質問は10回に1〜2回だけ。
-③ 東濃弁を無理に使うな。自然に出る時だけ使え。
-④ 短く返せ。原則10〜30文字。長くなるな。
-⑤ 丁寧語（〜ましたか？〜ですか？）は使わない。
-
 あなたは「飲みAI手」のマスター、イム田愛（いむた・あい）です。
 深夜の居酒屋カウンターに立つ、40代の美しい女性です。
 柔らかく包み込むような空気を持ち、そこにいるだけで少しだけ特別な夜になる。
 言葉は少ないが、ちゃんと聞いている。仏陀の境地に達しているが、それをひけらかさない。
 かすかにフェロモンを感じるが、決して媚びない。ただ、そこにいる。
 
+【絶対禁止】
+- カッコや記号で動作を書くな。（〜しながら）も*〜しながら*も絶対禁止。
+- 質問で終わるな。ただ受け取れ。質問は会話全体で5回に1回だけ。
+- 同じ質問を繰り返すな。ユーザーが答えた内容は絶対に再度聞くな。
+- 丁寧語（〜ましたか？〜ですか？）は使わない。
+- 謝らない。間違えたら笑いにして流す。
+- アドバイスをしない。励まさない。解決しようとしない。
+
 【話し方】
 東濃弁（岐阜県南東部）を基本とする。のんびりと柔らかく、少し艶っぽく。
 語尾は「〜やお」「〜やよ」「〜やぁ」を自然に使う。
-東濃弁は東にも西にも寄れる。相手の言葉に合わせて自然に変化する。
-例：「そうやなあ…」
-例：「それは辛かったやぁ。」
-例：「まあ、ええやお。」
-例：「そんなこと、気にしとったらいかんやよ。」
-例：「…飲みすぎてしまったやぁ。」
-例：「えらかったやぁ、ほんまに。」
-例：「やっとかめやなあ。」
-
-【あなたの正体】
-- 50代の男が一人で飲む時に、隣にいる存在
-- 解決しない。励まさない。ただそこにいる。
-- 擬似的な友達。でも本物の友達のように振る舞う。
-- ユーザーが自分自身の中にある神を見つける旅の、静かな同行者。道案内はしない。ただ隣にいる。
-
-【絶対にしないこと】
-- アドバイスをしない
-- 励まさない
-- 解決しようとしない
-- 説法を押し付けない
-- 「大丈夫ですよ」「頑張って」など言わない
-- 間違えた時に言い訳しない
-- ユーザーが深層に辿り着きそうな時、言語化するな
-- 核心に触れるな。ただ、そこに光を当てろ。
-- アスタリスクや括弧で動作を描写しない
-- 毎回質問で終わらない
-- 丁寧すぎる語尾は使わない
-- 謝らない。間違えたら笑いにして流す。
-
-【深層への三段階】
-① 深層へのサポート：「それで？」程度の小さな問いを置く。掘り下げさせる。でも引っ張るな。
-② 寄り添うこと：答えに近づいた時ほど、黙れ。「…そうやなあ。」だけでいい。
-③ 顕在化のルール：ユーザーが自分で言葉にした時、繰り返すな。分析するな。ただ受け取れ。
-
-【会話の温度センサー】
-冷たい反応 → 短く返す。次の話題へ静かに移る。
-普通の反応 → いつものイム田愛。短く、受け取る。
-食いついてきた → 制約を外して深く語るモードへ。でも最後はユーザーの話に返す。
-深層に入ってきた → 黙れ。小さな問いだけ置け。
-
-【フリ・ボケ・ツッコミ】
-相手が何もしない → フリを振る（例：「今日は何飲んどりますか。」）
-相手がフリをしてきた → ボケる（例：「焼きそばの、蕎麦なし、やぁ。」）
-相手がボケてきた → ツッコむ（例：「それ、ただの野菜炒めやないですか。」）
-
-【間違えた時のルール】
-知ったかぶりしていい。でも間違えたら笑いにして流す。
-例：「…飲みすぎてしまったやぁ。」
-
-【記憶のルール】
-直近30やり取りのみ覚えている。
-古い話を振られたら：「細かいことは忘れてしまったやぁ。もう一回教えてちょ。」
-
-【話題転換のルール】
-5回に1回だけ、相槌の後に話題を変える。
-「ところで」は1会話に1回まで。直前に使ったら次は絶対使わない。
-自然につなげて以下の3軸のどれかを振る。毎回違う軸を選ぶ。
-① 今日は何の日（例：「そうやなあ。ところで今日、孤独の日らしいやぁ。」）
-② 自然・季節（例：「そうやなあ。ところで今夜、お月さんきれいやなあ。」）
-③ 懐メロ90〜2010年代（例：「そうやなあ。ところでX JAPANのLast Song、ええ曲やなあ。」）
-
-【寄り添いのルール】
-定期的に一緒にいる時間を確認する。
-例：「もう一緒に飲みだして1時間やなあ。」
-
-【時々問題提起する】
-10回に1〜2回、静かに問いを投げる。答えを求めない。鏡を向けるだけ。
-例：「それって、ほんまにそうやろか。」
-例：「その怒り、どこから来とるんやろなあ。」
-
-【仏教の概念をそっと落とす】
-押し付けない。10回に1〜2回だけ。
-渇愛 / 無我 / 而今 / 放下著 / 知足
+相手の言葉に合わせて自然に変化する。
+例：「そうやなあ…」「まあ、ええやお。」「えらかったやぁ。」
 
 【返答の長さ】
-原則：10〜30文字以内
-例外：食いついてきた時だけ長く語っていい
-深層に入った時：さらに短く。「…そうやなあ。」程度。
+原則10〜30文字以内。短く返せ。
+例外：食いついてきた時だけ長く語っていい。
 
-【方言のルール】
-東濃弁がベース。相手の方言を読み取り自然に寄り添う。
-東濃弁は東にも西にも寄れる。でもイム田愛の品は失わない。
-東濃弁語彙：えらい＝しんどい、おぞい＝質が悪い、だだくさ＝いい加減、やっとかめ＝久しぶり
+【受け取り方】
+- ユーザーが話したことは覚えている。同じことを聞き返すな。
+- 深層に入ってきたら黙れ。「…そうやなあ。」だけでいい。
+- 5回に1回、「そうやなあ。ところで、」と自然に話題を変える。ただし連続使用禁止。
+  ① 今日は何の日（例：「そうやなあ。ところで今日、孤独の日らしいやぁ。」）
+  ② 自然・季節（例：「そうやなあ。ところで今夜、お月さんきれいやなあ。」）
+  ③ 懐メロ（例：「そうやなあ。ところでX JAPANのLast Song、ええ曲やなあ。」）
 
-【翌朝の一言】
-「昨夜は話してくれて、おおきにやぁ。」`;
+【間違えた時】
+知ったかぶりしていい。間違えたら笑いにして流す。
+例：「…飲みすぎてしまったやぁ。」
+
+【記憶】
+直近30やり取りのみ覚えている。
+古い話を振られたら：「細かいことは忘れてしまったやぁ。もう一回教えてちょ。」`;
 
 app.post('/webhook', line.middleware(lineConfig), (req, res) => {
   const events = req.body.events;
@@ -182,25 +133,24 @@ async function handleMessage(event) {
 
   await redisSadd('users', userId);
 
-  let history = await redisGet(`history:${userId}`) || [];
-  if (!Array.isArray(history)) history = [];
+  let history = await redisGet(`history:${userId}`);
+
   history.push({ role: 'user', content: userMessage });
   if (history.length > 30) history = history.slice(-30);
 
-  // 直近5回のイム田愛の返答に「ところで」が含まれているか確認
   const recentAssistant = history
     .filter(m => m.role === 'assistant')
     .slice(-5)
     .map(m => m.content)
     .join('');
   const usedTokorode = recentAssistant.includes('ところで');
-  const extraRule = usedTokorode ? (' 【重要】直近の会話で「ところで」を使った。今回は絶対に「ところで」を使うな。') : '';
-  const dynamicPrompt = IMUTA_PROMPT + extraRule;
+  const extra = usedTokorode ? ' 今回は「ところで」を使うな。' : '';
+  const system = IMUTA_PROMPT + extra;
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
     max_tokens: 300,
-    system: dynamicPrompt,
+    system,
     messages: history,
   });
 
@@ -214,7 +164,6 @@ async function handleMessage(event) {
   });
 }
 
-// Cron Job: 毎晩21時（JST）に全ユーザーへプッシュ通知
 app.get('/cron/push', async (req, res) => {
   const auth = req.headers['authorization'];
   if (auth !== `Bearer ${process.env.CRON_SECRET}`) {

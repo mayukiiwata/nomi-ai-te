@@ -29,13 +29,14 @@ async function redisGet(key) {
 }
 
 async function redisSet(key, value) {
+  const jsonStr = JSON.stringify(value);
   await fetch(`${REDIS_URL}/set/${key}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${REDIS_TOKEN}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ value: JSON.stringify(value) }),
+    body: JSON.stringify(jsonStr),
   });
 }
 

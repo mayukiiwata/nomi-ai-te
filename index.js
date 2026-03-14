@@ -187,11 +187,8 @@ async function handleMessage(event) {
     .map(m => m.content)
     .join('');
   const usedTokorode = recentAssistant.includes('ところで');
-  const dynamicPrompt = usedTokorode
-    ? IMUTA_PROMPT + '
-
-【重要】直近の会話で「ところで」を使った。今回は絶対に「ところで」を使うな。'
-    : IMUTA_PROMPT;
+  const extraRule = usedTokorode ? (' 【重要】直近の会話で「ところで」を使った。今回は絶対に「ところで」を使うな。') : '';
+  const dynamicPrompt = IMUTA_PROMPT + extraRule;
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',

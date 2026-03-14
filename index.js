@@ -21,23 +21,34 @@ const REDIS_URL = process.env.KV_REST_API_URL;
 const REDIS_TOKEN = process.env.KV_REST_API_TOKEN;
 
 async function redisGet(key) {
-  const res = await fetch(`${REDIS_URL}/get/${key}`, {
-    headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
-  });
-  const data = await res.json();
-  return data.result ? JSON.parse(data.result) : null;
+  try {
+    const res = await fetch(`${REDIS_URL}/get/${encodeURIComponent(key)}`, {
+      headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
+    });
+    const data = await res.json();
+    if (!data.result) return null;
+    return JSON.parse(data.result);
+  } catch (e) {
+    console.error('redisGet error:', e);
+    return null;
+  }
 }
 
 async function redisSet(key, value) {
-  const jsonStr = JSON.stringify(value);
-  await fetch(`${REDIS_URL}/set/${key}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${REDIS_TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(jsonStr),
-  });
+  try {
+    const encoded = encodeURIComponent(key);
+    const jsonStr = JSON.stringify(value);
+    await fetch(`${REDIS_URL}/set/${encoded}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${REDIS_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(jsonStr),
+    });
+  } catch (e) {
+    console.error('redisSet error:', e);
+  }
 }
 
 async function redisSmembers(key) {

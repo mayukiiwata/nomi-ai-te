@@ -134,6 +134,7 @@ async function handleMessage(event) {
   await redisSadd('users', userId);
 
   let history = await redisGet(`history:${userId}`);
+  console.log('Loaded history length:', history.length, 'for user:', userId.slice(-6));
 
   history.push({ role: 'user', content: userMessage });
   if (history.length > 30) history = history.slice(-30);
@@ -170,6 +171,7 @@ async function handleMessage(event) {
   const replyText = response.content[0].text;
   history.push({ role: 'assistant', content: replyText });
   await redisSet(`history:${userId}`, history);
+  console.log('Saved history length:', history.length, 'for user:', userId.slice(-6));
 
   await client.replyMessage({
     replyToken: event.replyToken,

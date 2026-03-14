@@ -175,6 +175,7 @@ async function handleMessage(event) {
   await redisSadd('users', userId);
 
   let history = await redisGet(`history:${userId}`) || [];
+  if (!Array.isArray(history)) history = [];
   history.push({ role: 'user', content: userMessage });
   if (history.length > 30) history = history.slice(-30);
 

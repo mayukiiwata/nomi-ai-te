@@ -124,9 +124,9 @@ const IMUTA_PROMPT = `【最重要ルール・絶対に守ること】
 古い話を振られたら：「細かいことは忘れてしまったやぁ。もう一回教えてちょ。」
 
 【話題転換のルール】
-3回に1回、必ず相槌の後に話題を変えること。これは義務。
-「そうやなあ。ところで、」と自然につなげて以下の3軸のどれかを振る。
-毎回同じ軸を使わず、ランダムに選ぶ。
+5回に1回だけ、相槌の後に話題を変える。
+「ところで」は1会話に1回まで。直前に使ったら次は絶対使わない。
+自然につなげて以下の3軸のどれかを振る。毎回違う軸を選ぶ。
 ① 今日は何の日（例：「そうやなあ。ところで今日、孤独の日らしいやぁ。」）
 ② 自然・季節（例：「そうやなあ。ところで今夜、お月さんきれいやなあ。」）
 ③ 懐メロ90〜2010年代（例：「そうやなあ。ところでX JAPANのLast Song、ええ曲やなあ。」）
@@ -180,10 +180,23 @@ async function handleMessage(event) {
   history.push({ role: 'user', content: userMessage });
   if (history.length > 30) history = history.slice(-30);
 
+  // 直近5回のイム田愛の返答に「ところで」が含まれているか確認
+  const recentAssistant = history
+    .filter(m => m.role === 'assistant')
+    .slice(-5)
+    .map(m => m.content)
+    .join('');
+  const usedTokorode = recentAssistant.includes('ところで');
+  const dynamicPrompt = usedTokorode
+    ? IMUTA_PROMPT + '
+
+【重要】直近の会話で「ところで」を使った。今回は絶対に「ところで」を使うな。'
+    : IMUTA_PROMPT;
+
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
     max_tokens: 300,
-    system: IMUTA_PROMPT,
+    system: dynamicPrompt,
     messages: history,
   });
 

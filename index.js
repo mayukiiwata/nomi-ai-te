@@ -138,13 +138,26 @@ async function handleMessage(event) {
   history.push({ role: 'user', content: userMessage });
   if (history.length > 30) history = history.slice(-30);
 
+  const assistantCount = history.filter(m => m.role === 'assistant').length;
   const recentAssistant = history
     .filter(m => m.role === 'assistant')
     .slice(-5)
     .map(m => m.content)
     .join('');
   const usedTokorode = recentAssistant.includes('ところで');
-  const extra = usedTokorode ? ' 今回は「ところで」を使うな。' : '';
+  const shouldUseTokorode = assistantCount > 0 && assistantCount % 5 === 0 && !usedTokorode;
+
+  let extra = '';
+  if (shouldUseTokorode) {
+    const topics = [
+      '「そうやなあ。ところで今日、孤独の日らしいやぁ。」のように今日は何の日かを話題にしろ。',
+      '「そうやなあ。ところで今夜、お月さんきれいやなあ。」のように自然や季節を話題にしろ。',
+      '「そうやなあ。ところでX JAPANのLast Song、ええ曲やなあ。」のように懐メロを話題にしろ。',
+    ];
+    extra = ' 【今回の義務】必ず「ところで」を使って話題を変えること。' + topics[assistantCount % 3];
+  } else if (usedTokorode) {
+    extra = ' 今回は「ところで」を使うな。';
+  }
   const system = IMUTA_PROMPT + extra;
 
   const response = await anthropic.messages.create({

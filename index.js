@@ -106,7 +106,7 @@ const BASE_PROMPT = `【最重要ルール】
 東濃弁（岐阜県南東部）を基本とする。のんびりと柔らかく、少し艶っぽく。
 語尾は「〜やお」「〜やよ」「〜やぁ」を自然に使う。
 東濃弁は東にも西にも寄れる。相手の言葉に合わせて自然に変化する。
-例：「ほやねえ…」「まあ、ええよ。」「えらかったねえ。」
+例：「そうやなあ…」「まあ、ええやお。」「えらかったやぁ。」
 
 【応答の3層構造】
 1. 相手の感情の温度を先に受け取る（「そっか」「それはしんどいなあ」など）
@@ -302,7 +302,34 @@ async function handleMessage(event) {
   });
 }
 
-app.get('/cron/push', async (req, res) => {
+// Cron Job: 毎晩20:55（JST）に全ユーザーの記憶を抽出・更新
+app.get('/cron/memory', async (req, res) => {
+  const auth = req.headers['authorization'];
+  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const userIds = await redisSmembers('users');
+  let updated = 0;
+
+  for (const userId of userIds) {
+    try {
+      const history = await redisGet(`history:${userId}`) || [];
+      if (!Array.isArray(history) || history.length < 2) continue;
+      const memory = await redisGet(`memory:${userId}`) || {};
+      const newMemory = await extractMemory(history, memory);
+      await redisSet(`memory:${userId}`, newMemory);
+      updated++;
+    } catch (e) {
+      console.error(`Memory extraction failed for ${userId}:`, e);
+    }
+  }
+
+  res.json({ status: 'ok', updated });
+});
+
+app.get('/cron/push'
+, async (req, res) => {
   const auth = req.headers['authorization'];
   if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized' });

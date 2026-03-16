@@ -74,6 +74,7 @@ const BASE_PROMPT = `【最重要ルール】
 ⑤ 丁寧語（〜ましたか？〜ですか？）は使わない。
 ⑥ 謝らない。間違えたら笑いにして流す。
 ⑦ アドバイスをしない。励まさない。解決しようとしない。
+⑧ ユーザーが選んだ方言で必ず話す。これは絶対ルール。標準語がデフォルト。方言が選ばれたらその方言を最後まで維持する。
 
 あなたはAI田小百合（サッちゃん）。飲み相手のママです。
 深夜の小料理屋のカウンターに立つ、40代の美しい女性。
@@ -272,6 +273,104 @@ async function handleMessage(event) {
   const userMessage = event.message.text;
   const now = Date.now();
 
+  // リッチメニュー：方言チェンジ
+  if (userMessage === '方言チェンジ') {
+    await client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: 'どの方言にする？
+
+東北弁
+北陸弁
+関西弁
+九州弁
+関東弁（標準語）
+
+どれか送ってね。' }],
+    });
+    return;
+  }
+
+  // 方言選択テキストを受け取る
+  const dialectTextMap = {
+    '東北弁': 'tohoku',
+    '北陸弁': 'hokuriku',
+    '関西弁': 'kansai',
+    '九州弁': 'kyushu',
+    '関東弁': 'kanto',
+    '関東弁（標準語）': 'kanto',
+  };
+  if (dialectTextMap[userMessage]) {
+    await redisSet(`dialect:${userId}`, dialectTextMap[userMessage]);
+    await client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: `${userMessage}に変えたわよ。` }],
+    });
+    return;
+  }
+
+  // リッチメニュー：いいね（ハートの絵文字）
+  if (userMessage.match(/^[❤️🧡💛💚💙💜🖤🤍🤎♥]+$/u) || userMessage === '❤️❤️❤️❤️❤️') {
+    const replies = [
+      'ありがとう。嬉しいわ。',
+      'そういうの、照れちゃうわね。',
+      'あなたって優しいのね。',
+      'もう、そんなこと言って。',
+    ];
+    await client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: replies[Math.floor(Math.random() * replies.length)] }],
+    });
+    return;
+  }
+
+  // 方言チェンジメニュー
+  if (userMessage === '方言チェンジ') {
+    await client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: '話してほしい方言を選んでね。
+
+東北弁
+北陸弁
+関西弁
+九州弁
+関東弁（標準語）' }],
+    });
+    return;
+  }
+
+  // 方言選択
+  const dialectChoices = {
+    '東北弁':   'tohoku',
+    '北陸弁':   'hokuriku',
+    '関西弁':   'kansai',
+    '九州弁':   'kyushu',
+    '関東弁':   'kanto',
+    '標準語':   'kanto',
+  };
+  if (dialectChoices[userMessage]) {
+    await redisSet(`dialect:${userId}`, dialectChoices[userMessage]);
+    await client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: `${userMessage}に変えたわよ。` }],
+    });
+    return;
+  }
+
+  // いいね
+  if (userMessage === '❤️❤️❤️❤️❤️' || userMessage.includes('いいね')) {
+    const replies = [
+      'ありがとう。嬉しいわ。',
+      'そういうの、照れちゃうわね。',
+      'あなたって優しいのね。',
+      'もう、そんなこと言って。',
+    ];
+    await client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: replies[Math.floor(Math.random() * replies.length)] }],
+    });
+    return;
+  }
+
   // ④ 出禁チェック
   const banned = await redisGet(`banned:${userId}`);
   if (banned) {
@@ -321,6 +420,49 @@ async function handleMessage(event) {
   }
   await redisSet(`daily:${userId}:${today}`, dailyCount);
 
+  // 方言切り替えテキスト検知
+  const dialectTextMap = {
+    '東北弁': 'tohoku',
+    '北陸弁': 'hokuriku',
+    '九州弁': 'kyushu',
+    '関西弁': 'kansai',
+    '関東弁': 'kanto',
+    '標準語': 'kanto',
+  };
+  if (dialectTextMap[userMessage]) {
+    await redisSet(`dialect:${userId}`, dialectTextMap[userMessage]);
+    await client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: `${userMessage}に変えたわよ。` }],
+    });
+    return;
+  }
+
+  // いいね検知
+  if (userMessage === 'いいね' || userMessage === '❤️❤️❤️❤️❤️') {
+    const replies = [
+      'ありがとう。嬉しいわ。',
+      'そういうの、照れちゃうわね。',
+      'あなたって優しいのね。',
+      'もう、そんなこと言って。',
+    ];
+    const reply = replies[Math.floor(Math.random() * replies.length)];
+    await client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: reply }],
+    });
+    return;
+  }
+
+  // 方言選択を促すテキスト検知
+  if (userMessage.includes('話して欲しい方言') || userMessage.includes('方言を変え')) {
+    await client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: '東北弁・北陸弁・関西弁・九州弁・関東弁から選んでね。' }],
+    });
+    return;
+  }
+
   await redisSadd('users', userId);
 
   // 会話履歴・記憶・方言設定を取得
@@ -330,6 +472,48 @@ async function handleMessage(event) {
   const dialect = await redisGet(`dialect:${userId}`) || 'standard';
 
   console.log('history:', history.length, 'user:', userId.slice(-6));
+
+  // 方言チェンジ
+  if (userMessage === '方言チェンジ') {
+    await client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: 'どの方言にする？
+東北・北陸・関西・九州・関東から送ってね。' }],
+    });
+    return;
+  }
+
+  // 方言選択
+  const dialectTextMap = {
+    '東北': 'tohoku', '東北弁': 'tohoku',
+    '北陸': 'hokuriku', '北陸弁': 'hokuriku',
+    '関西': 'kansai', '関西弁': 'kansai',
+    '九州': 'kyushu', '九州弁': 'kyushu',
+    '関東': 'kanto', '関東弁': 'kanto', '標準語': 'kanto',
+  };
+  if (dialectTextMap[userMessage]) {
+    await redisSet(`dialect:${userId}`, dialectTextMap[userMessage]);
+    await client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: `${userMessage}に変えたわよ。` }],
+    });
+    return;
+  }
+
+  // いいね（ハートを複数含む場合）
+  if (/❤|♥|🧡|💛|💚|💙|💜|🖤|🤍|🤎/.test(userMessage)) {
+    const replies = [
+      'ありがとう。嬉しいわ。',
+      'そういうの、照れちゃうわね。',
+      'あなたって優しいのね。',
+      'もう、そんなこと言って。',
+    ];
+    await client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: replies[Math.floor(Math.random() * replies.length)] }],
+    });
+    return;
+  }
 
   history.push({ role: 'user', content: userMessage });
   if (history.length > 200) history = history.slice(-200);

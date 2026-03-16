@@ -12,11 +12,12 @@
       "dest": "index.js"
     }
   ],
+  "functions": {
+    "index.js": {
+      "maxDuration": 30
+    }
+  },
   "crons": [
-    {
-      "path": "/cron/memory",
-      "schedule": "0 11 * * *"
-    },
     {
       "path": "/cron/push",
       "schedule": "0 12 * * *"

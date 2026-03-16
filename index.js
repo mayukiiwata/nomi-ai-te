@@ -154,7 +154,7 @@ function buildSystemPrompt(memory, dialect) {
     const dialectMap = {
       tohoku: '東北弁で話す。語尾に「〜だべ」「〜だっちゃ」などを自然に使う。',
       kanto: '標準語で話す。',
-      tono: '東濃弁（岐阜県南東部）で話す。語尾に「〜やぁ」「〜やお」「〜やよ」を自然に使う。',
+      hokuriku: '北陸弁（富山・石川・福井）で話す。語尾に「〜やちゃ」「〜やわ」「〜けど」などを自然に使う。',
       kansai: '関西弁で話す。語尾に「〜やな」「〜やで」「〜やん」などを自然に使う。',
       kyushu: '九州弁で話す。語尾に「〜ばい」「〜たい」「〜けん」などを自然に使う。',
     };
@@ -216,10 +216,54 @@ ${log}
 
 // ── Webhook ───────────────────────────────────────────
 app.post('/webhook', line.middleware(lineConfig), (req, res) => {
-  Promise.all(req.body.events.map(handleMessage))
+  Promise.all(req.body.events.map(handleEvent))
     .then(() => res.json({ status: 'ok' }))
     .catch(err => { console.error(err); res.status(500).end(); });
 });
+
+async function handleEvent(event) {
+  if (event.type === 'postback') {
+    await handlePostback(event);
+  } else if (event.type === 'message' && event.message.type === 'text') {
+    await handleMessage(event);
+  }
+}
+
+async function handlePostback(event) {
+  const userId = event.source.userId;
+  const data = event.postback.data;
+
+  const dialectMap = {
+    'dialect=tohoku':  { key: 'tohoku',   label: '東北弁に変えたわよ。' },
+    'dialect=hokuriku':{ key: 'hokuriku', label: '北陸弁に変えたわよ。' },
+    'dialect=kyushu':  { key: 'kyushu',   label: '九州弁に変えたわよ。' },
+    'dialect=kansai':  { key: 'kansai',   label: '関西弁に変えたわよ。' },
+    'dialect=kanto':   { key: 'kanto',    label: '標準語に戻したわよ。' },
+  };
+
+  if (dialectMap[data]) {
+    await redisSet(`dialect:${userId}`, dialectMap[data].key);
+    await client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: dialectMap[data].label }],
+    });
+    return;
+  }
+
+  if (data === 'action=heart') {
+    const replies = [
+      'ありがとう。嬉しいわ。',
+      'そういうの、照れちゃうわね。',
+      'あなたって優しいのね。',
+      'もう、そんなこと言って。',
+    ];
+    const reply = replies[Math.floor(Math.random() * replies.length)];
+    await client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: reply }],
+    });
+  }
+}
 
 async function handleMessage(event) {
   if (event.type !== 'message' || event.message.type !== 'text') return;

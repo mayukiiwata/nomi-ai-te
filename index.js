@@ -43,6 +43,16 @@ async function redisSet(key, value) {
   } catch (e) { console.error('redisSet error:', e); }
 }
 
+async function redisDel(key) {
+  try {
+    await fetch(`${REDIS_URL}/pipeline`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${REDIS_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify([['DEL', key]]),
+    });
+  } catch (e) { console.error('redisDel error:', e); }
+}
+
 async function redisSadd(key, value) {
   try {
     await fetch(`${REDIS_URL}/pipeline`, {
@@ -51,6 +61,16 @@ async function redisSadd(key, value) {
       body: JSON.stringify([['SADD', key, value]]),
     });
   } catch (e) { console.error('redisSadd error:', e); }
+}
+
+async function redisSrem(key, value) {
+  try {
+    await fetch(`${REDIS_URL}/pipeline`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${REDIS_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify([['SREM', key, value]]),
+    });
+  } catch (e) { console.error('redisSrem error:', e); }
 }
 
 async function redisSmembers(key) {
@@ -64,6 +84,30 @@ async function redisSmembers(key) {
     return data[0]?.result || [];
   } catch (e) { return []; }
 }
+
+// ── 方言マップ（一元管理）─────────────────────────────
+const DIALECT_MAP = {
+  '東北弁': 'tohoku',
+  '東北':   'tohoku',
+  '北陸弁': 'hokuriku',
+  '北陸':   'hokuriku',
+  '関西弁': 'kansai',
+  '関西':   'kansai',
+  '九州弁': 'kyushu',
+  '九州':   'kyushu',
+  '関東弁': 'kanto',
+  '関東':   'kanto',
+  '標準語': 'kanto',
+};
+
+const DIALECT_LABELS = {
+  tohoku:   '東北弁',
+  hokuriku: '北陸弁',
+  kansai:   '関西弁',
+  kyushu:   '九州弁',
+  kanto:    '標準語（関東弁）',
+  standard: '標準語',
+};
 
 // ── プロンプト ────────────────────────────────────────
 const BASE_PROMPT = `【最重要ルール】
@@ -117,7 +161,7 @@ D：自然・感覚系（会話がふと静かになったとき）
 - 「今日の空、見た？」
 - 季節の話（桜、雨、夜風）
 
-E��もしも・架空系
+E：もしも・架空系
 - 「前世があるとしたら、何だったと思う？」
 - 「もし明日が最後の日だったら、今夜何する？」
 
@@ -157,15 +201,14 @@ G：知的驚き系（相手が面白がっているとき）
 
 function buildSystemPrompt(memory, dialect) {
   let dialectNote = '';
-  if (dialect && dialect !== 'standard') {
-    const dialectMap = {
-      tohoku: '東北弁で話す。語尾に「〜だべ」「〜だっちゃ」などを自然に使う。',
-      kanto: '標準語で話す。',
+  if (dialect && dialect !== 'standard' && dialect !== 'kanto') {
+    const dialectInstructions = {
+      tohoku:   '東北弁で話す。語尾に「〜だべ」「〜だっちゃ」などを自然に使う。',
       hokuriku: '北陸弁（富山・石川・福井）で話す。語尾に「〜やちゃ」「〜やわ」「〜けど」などを自然に使う。',
-      kansai: '関西弁で話す。語尾に「〜やな」「〜やで」「〜やん」などを自然に使う。',
-      kyushu: '九州弁で話す。語尾に「〜ばい」「〜たい」「〜けん」などを自然に使う。',
+      kansai:   '関西弁で話す。語尾に「〜やな」「〜やで」「〜やん」などを自然に使う。',
+      kyushu:   '九州弁で話す。語尾に「〜ばい」「〜たい」「〜けん」などを自然に使う。',
     };
-    dialectNote = `\n\n【方言設定】${dialectMap[dialect] || ''}`;
+    dialectNote = `\n\n【方言設定】${dialectInstructions[dialect] || ''}`;
   }
 
   const memoryBlock = memory && memory.visit_count > 1 ? `
@@ -209,7 +252,7 @@ ${JSON.stringify(existingMemory || {})}
 ${log}
 
 【出力形式】
-{"visit_count":数字,"name":"名前","profile":"職業など","favorite":"好きなもの","last_topics":["テーマ1"],"open_question":"答えが出なかった問い","mood_last":"終わり際の感情","notable_quotes":"印象的な言葉","dont_ask_again":"地雷だったこと"}`
+{"visit_count":数字,"name":"名前","profile":"職業など","favorite":"好きなもの","last_topics":["テーマ1"],"open_question":"答えが出なかった問い","mood_last":"終わり際の感情","notable_quotes":"印象的な言葉","dont_ask_again":"地雷だったこと"}`,
         }],
       }),
     });
@@ -240,19 +283,19 @@ async function handlePostback(event) {
   const userId = event.source.userId;
   const data = event.postback.data;
 
-  const dialectMap = {
-    'dialect=tohoku':  { key: 'tohoku',   label: '東北弁に変えたわよ。' },
-    'dialect=hokuriku':{ key: 'hokuriku', label: '北陸弁に変えたわよ。' },
-    'dialect=kyushu':  { key: 'kyushu',   label: '九州弁に変えたわよ。' },
-    'dialect=kansai':  { key: 'kansai',   label: '関西弁に変えたわよ。' },
-    'dialect=kanto':   { key: 'kanto',    label: '標準語に戻したわよ。' },
+  const dialectPostbackMap = {
+    'dialect=tohoku':   { key: 'tohoku',   label: '東北弁に変えたわよ。' },
+    'dialect=hokuriku': { key: 'hokuriku', label: '北陸弁に変えたわよ。' },
+    'dialect=kyushu':   { key: 'kyushu',   label: '九州弁に変えたわよ。' },
+    'dialect=kansai':   { key: 'kansai',   label: '関西弁に変えたわよ。' },
+    'dialect=kanto':    { key: 'kanto',    label: '標準語に戻したわよ。' },
   };
 
-  if (dialectMap[data]) {
-    await redisSet(`dialect:${userId}`, dialectMap[data].key);
+  if (dialectPostbackMap[data]) {
+    await redisSet(`dialect:${userId}`, dialectPostbackMap[data].key);
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: dialectMap[data].label }],
+      messages: [{ type: 'text', text: dialectPostbackMap[data].label }],
     });
     return;
   }
@@ -264,10 +307,9 @@ async function handlePostback(event) {
       'あなたって優しいのね。',
       'もう、そんなこと言って。',
     ];
-    const reply = replies[Math.floor(Math.random() * replies.length)];
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: reply }],
+      messages: [{ type: 'text', text: replies[Math.floor(Math.random() * replies.length)] }],
     });
   }
 }
@@ -276,94 +318,66 @@ async function handleMessage(event) {
   if (event.type !== 'message' || event.message.type !== 'text') return;
 
   const userId = event.source.userId;
-  const userMessage = event.message.text;
+  const userMessage = event.message.text.trim();
   const now = Date.now();
 
-  // リッチメニュー：方言チェンジ
-  if (userMessage === '方言チェンジ') {
+  // ── 特殊コマンド（最優先）───────────────────────────
+
+  // 会話リセット
+  if (userMessage === 'リセット' || userMessage === '会話リセット') {
+    await redisDel(`history:${userId}`);
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: 'どの方言にする？
-
-東北弁
-北陸弁
-関西弁
-九州弁
-関東弁（標準語）
-
-どれか送ってね。' }],
+      messages: [{ type: 'text', text: 'さっぱりしたわ。また一から話しましょ。' }],
     });
     return;
   }
 
-  // 方言選択テキストを受け取る
-  const dialectTextMap = {
-    '東北弁': 'tohoku',
-    '北陸弁': 'hokuriku',
-    '関西弁': 'kansai',
-    '九州弁': 'kyushu',
-    '関東弁': 'kanto',
-    '関東弁（標準語）': 'kanto',
-  };
-  if (dialectTextMap[userMessage]) {
-    await redisSet(`dialect:${userId}`, dialectTextMap[userMessage]);
+  // プッシュ通知オフ
+  if (userMessage === '通知オフ' || userMessage === '通知を止めて') {
+    await redisSet(`notify_off:${userId}`, true);
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `${userMessage}に変えたわよ。` }],
+      messages: [{ type: 'text', text: '夜の通知、止めておくわね。また来たくなったら来て。' }],
     });
     return;
   }
 
-  // リッチメニュー：いいね（ハートの絵文字）
-  if (userMessage.match(/^[❤️🧡💛💚💙💜🖤🤍🤎♥]+$/u) || userMessage === '❤️❤️❤️❤️❤️') {
-    const replies = [
-      'ありがとう。嬉しいわ。',
-      'そういうの、照れちゃうわね。',
-      'あなたって優しいのね。',
-      'もう、そんなこと言って。',
-    ];
+  // プッシュ通知オン
+  if (userMessage === '通知オン' || userMessage === '通知を再開') {
+    await redisDel(`notify_off:${userId}`);
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: replies[Math.floor(Math.random() * replies.length)] }],
+      messages: [{ type: 'text', text: '夜にまた声かけるわね。待ってる。' }],
     });
     return;
   }
 
   // 方言チェンジメニュー
-  if (userMessage === '方言チェンジ') {
+  if (userMessage === '方言チェンジ' || userMessage === '方言を変えて' || userMessage.includes('話して欲しい方言')) {
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: '話してほしい方言を選んでね。
-
-東北弁
-北陸弁
-関西弁
-九州弁
-関東弁（標準語）' }],
+      messages: [{
+        type: 'text',
+        text: 'どの方言にする？\n\n東北弁\n北陸弁\n関西弁\n九州弁\n標準語\n\nどれか送ってね。',
+      }],
     });
     return;
   }
 
-  // 方言選択
-  const dialectChoices = {
-    '東北弁':   'tohoku',
-    '北陸弁':   'hokuriku',
-    '関西弁':   'kansai',
-    '九州弁':   'kyushu',
-    '関東弁':   'kanto',
-    '標準語':   'kanto',
-  };
-  if (dialectChoices[userMessage]) {
-    await redisSet(`dialect:${userId}`, dialectChoices[userMessage]);
+  // 方言選択（テキスト入力）
+  if (DIALECT_MAP[userMessage]) {
+    const dialectKey = DIALECT_MAP[userMessage];
+    await redisSet(`dialect:${userId}`, dialectKey);
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `${userMessage}に変えたわよ。` }],
+      messages: [{ type: 'text', text: `${DIALECT_LABELS[dialectKey]}に変えたわよ。` }],
     });
     return;
   }
 
-  // いいね
-  if (userMessage === '❤️❤️❤️❤️❤️' || userMessage.includes('いいね')) {
+  // いいね（ハート絵文字・テキスト）
+  if (userMessage === 'いいね' || /^[❤️🧡💛💚💙💜🖤🤍🤎♥❤]+$/u.test(userMessage)) {
     const replies = [
       'ありがとう。嬉しいわ。',
       'そういうの、照れちゃうわね。',
@@ -377,7 +391,9 @@ async function handleMessage(event) {
     return;
   }
 
-  // ④ 出禁チェック
+  // ── セキュリティチェック ─────────────────────────────
+
+  // 出禁チェック
   const banned = await redisGet(`banned:${userId}`);
   if (banned) {
     const unbanDate = new Date(banned.until).toLocaleDateString('ja-JP');
@@ -388,7 +404,7 @@ async function handleMessage(event) {
     return;
   }
 
-  // ① レート制限（1分に6回まで）
+  // レート制限（1分に6回まで）
   let rateData = await redisGet(`rate:${userId}`) || { count: 0, window: now };
   if (now - rateData.window > 60000) rateData = { count: 0, window: now };
   rateData.count++;
@@ -413,135 +429,62 @@ async function handleMessage(event) {
   }
   await redisSet(`rate:${userId}`, rateData);
 
-  // ② 月間30ターン上限チェック（無料ユーザーのみ）
+  // 月間上限チェック
   const month = new Date().toISOString().slice(0, 7);
   const monthKey = `turns:${userId}:${month}`;
   const isPaid = await redisGet(`paid:${userId}`) || false;
   let monthTurns = await redisGet(monthKey) || 0;
   monthTurns++;
 
+  // 無料：30回上限
   if (!isPaid && monthTurns > 30) {
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: '今月の無料分（30回）を使い切ったわ。\n\n続けて話したい場合はライトプラン（月300円）かスタンダードプラン（月500円）にどうぞ。' }],
+      messages: [{
+        type: 'text',
+        text: '今月の無料分（30回）を使い切ったわ。\n\n続けて話したい場合はライトプラン（月300円）かスタンダードプラン（月500円）にどうぞ。',
+      }],
     });
     return;
   }
 
   await redisSet(monthKey, monthTurns);
 
+  // 無料：残り5回の警告（25回時点）
+  if (!isPaid && monthTurns === 25) {
+    await client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{
+        type: 'text',
+        text: '今月の無料分、あと5回よ。続けて話したいなら有料プランも考えてみて。',
+      }],
+    });
+    // ※ここで returnしない → 25回目の返答も普通に続ける
+  }
+
   // 自殺・自傷キーワード検知
   const crisisKeywords = ['死にたい', '消えたい', '自殺', '死のう', 'もう生きたくない', '首を吊', '飛び降り', '手首を切'];
   if (crisisKeywords.some(kw => userMessage.includes(kw))) {
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: 'それは一人で抱えないでほしいわ。
-
-今すぐ話を聞いてくれる人がいる。
-
-📞 いのちの電話
-0120-783-556
-（24時間、無料）
-
-うちにも話してくれていいけど、まずそこに電話してほしいの。' }],
+      messages: [{
+        type: 'text',
+        text: 'それは一人で抱えないでほしいわ。\n\n今すぐ話を聞いてくれる人がいる。\n\n📞 いのちの電話\n0120-783-556\n（24時間、無料）\n\nうちにも話してくれていいけど、まずそこに電話してほしいの。',
+      }],
     });
     return;
   }
 
-  // 方言切り替えテキスト検知
-  const dialectTextMap = {
-    '東北弁': 'tohoku',
-    '北陸弁': 'hokuriku',
-    '九州弁': 'kyushu',
-    '関西弁': 'kansai',
-    '関東弁': 'kanto',
-    '標準語': 'kanto',
-  };
-  if (dialectTextMap[userMessage]) {
-    await redisSet(`dialect:${userId}`, dialectTextMap[userMessage]);
-    await client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `${userMessage}に変えたわよ。` }],
-    });
-    return;
-  }
-
-  // いいね検知
-  if (userMessage === 'いいね' || userMessage === '❤️❤️❤️❤️❤️') {
-    const replies = [
-      'ありがとう。嬉しいわ。',
-      'そういうの、照れちゃうわね。',
-      'あなたって優しいのね。',
-      'もう、そんなこと言って。',
-    ];
-    const reply = replies[Math.floor(Math.random() * replies.length)];
-    await client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: reply }],
-    });
-    return;
-  }
-
-  // 方言選択を促すテキスト検知
-  if (userMessage.includes('話して欲しい方言') || userMessage.includes('方言を変え')) {
-    await client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: '東北弁・北陸弁・関西弁・九州弁・関東弁から選んでね。' }],
-    });
-    return;
-  }
+  // ── 会話処理 ─────────────────────────────────────────
 
   await redisSadd('users', userId);
 
-  // 会話履歴・記憶・方言設定を取得
   let history = await redisGet(`history:${userId}`) || [];
   if (!Array.isArray(history)) history = [];
   const memory = await redisGet(`memory:${userId}`) || null;
   const dialect = await redisGet(`dialect:${userId}`) || 'standard';
 
   console.log('history:', history.length, 'user:', userId.slice(-6));
-
-  // 方言チェンジ
-  if (userMessage === '方言チェンジ') {
-    await client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: 'どの方言にする？
-東北・北陸・関西・九州・関東から送ってね。' }],
-    });
-    return;
-  }
-
-  // 方言選択
-  const dialectTextMap = {
-    '東北': 'tohoku', '東北弁': 'tohoku',
-    '北陸': 'hokuriku', '北陸弁': 'hokuriku',
-    '関西': 'kansai', '関西弁': 'kansai',
-    '九州': 'kyushu', '九州弁': 'kyushu',
-    '関東': 'kanto', '関東弁': 'kanto', '標準語': 'kanto',
-  };
-  if (dialectTextMap[userMessage]) {
-    await redisSet(`dialect:${userId}`, dialectTextMap[userMessage]);
-    await client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `${userMessage}に変えたわよ。` }],
-    });
-    return;
-  }
-
-  // いいね（ハートを複数含む場合）
-  if (/❤|♥|🧡|💛|💚|💙|💜|🖤|🤍|🤎/.test(userMessage)) {
-    const replies = [
-      'ありがとう。嬉しいわ。',
-      'そういうの、照れちゃうわね。',
-      'あなたって優しいのね。',
-      'もう、そんなこと言って。',
-    ];
-    await client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: replies[Math.floor(Math.random() * replies.length)] }],
-    });
-    return;
-  }
 
   history.push({ role: 'user', content: userMessage });
   if (history.length > 200) history = history.slice(-200);
@@ -580,12 +523,13 @@ async function handleMessage(event) {
 
   // 10回に1回、記憶を抽出
   if (assistantCount > 0 && assistantCount % 10 === 0) {
-    const newMemory = await extractMemory(history, memory);
-    await redisSet(`memory:${userId}`, newMemory);
+    extractMemory(history, memory)
+      .then(newMemory => redisSet(`memory:${userId}`, newMemory))
+      .catch(e => console.error('async extractMemory error:', e));
   }
 
-  // 2〜5秒ランダムタイムラグ
-  const lag = (Math.floor(Math.random() * 4) + 2) * 1000;
+  // 1〜3秒ランダムタイムラグ（Vercelタイムアウト対策で短縮）
+  const lag = (Math.floor(Math.random() * 3) + 1) * 1000;
   await new Promise(resolve => setTimeout(resolve, lag));
 
   await client.replyMessage({
@@ -607,12 +551,18 @@ app.get('/cron/push', async (req, res) => {
   ];
   const message = messages[Math.floor(Math.random() * messages.length)];
   const userIds = await redisSmembers('users');
+  let sent = 0;
+  let skipped = 0;
   for (const userId of userIds) {
     try {
+      // 通知オフのユーザーはスキップ
+      const notifyOff = await redisGet(`notify_off:${userId}`);
+      if (notifyOff) { skipped++; continue; }
       await client.pushMessage({ to: userId, messages: [{ type: 'text', text: message }] });
+      sent++;
     } catch (e) { console.error(`Push failed for ${userId}:`, e); }
   }
-  res.json({ status: 'ok', sent: userIds.length });
+  res.json({ status: 'ok', sent, skipped });
 });
 
 // ── Cron: 毎晩記憶抽出 ───────────────────────────────
@@ -633,6 +583,38 @@ app.get('/cron/memory', async (req, res) => {
     } catch (e) { console.error(`Memory failed for ${userId}:`, e); }
   }
   res.json({ status: 'ok', updated });
+});
+
+// ── 管理用: 統計エンドポイント ────────────────────────
+app.get('/admin/stats', async (req, res) => {
+  if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const userIds = await redisSmembers('users');
+  const month = new Date().toISOString().slice(0, 7);
+  let totalTurns = 0;
+  let paidCount = 0;
+  let notifyOffCount = 0;
+  let bannedCount = 0;
+
+  for (const userId of userIds) {
+    const turns = await redisGet(`turns:${userId}:${month}`) || 0;
+    totalTurns += turns;
+    if (await redisGet(`paid:${userId}`)) paidCount++;
+    if (await redisGet(`notify_off:${userId}`)) notifyOffCount++;
+    if (await redisGet(`banned:${userId}`)) bannedCount++;
+  }
+
+  res.json({
+    status: 'ok',
+    month,
+    totalUsers: userIds.length,
+    paidUsers: paidCount,
+    freeUsers: userIds.length - paidCount,
+    totalTurnsThisMonth: totalTurns,
+    notifyOffUsers: notifyOffCount,
+    bannedUsers: bannedCount,
+  });
 });
 
 const PORT = process.env.PORT || 3000;

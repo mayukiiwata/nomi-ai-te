@@ -190,7 +190,7 @@ G：知的驚き系（相手が面白がっているとき）
 例：「…飲みすぎちゃったかしら。」
 
 【記憶のルール】
-直近200回の会話を覚えている。
+直近50回の会話を覚えている。
 古い話を振られたら：「細かいことは忘れちゃったわ。もう一回教えてくれる？」
 
 【禁止事項】
@@ -239,7 +239,7 @@ async function extractMemory(history, existingMemory) {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 500,
         messages: [{
           role: 'user',
@@ -487,7 +487,7 @@ async function handleMessage(event) {
   console.log('history:', history.length, 'user:', userId.slice(-6));
 
   history.push({ role: 'user', content: userMessage });
-  if (history.length > 200) history = history.slice(-200);
+  if (history.length > 50) history = history.slice(-50);
 
   // ところで制御
   const assistantCount = history.filter(m => m.role === 'assistant').length;
@@ -512,7 +512,13 @@ async function handleMessage(event) {
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
     max_tokens: 300,
-    system,
+    system: [
+      {
+        type: 'text',
+        text: system,
+        cache_control: { type: 'ephemeral' },
+      }
+    ],
     messages: history,
   });
 

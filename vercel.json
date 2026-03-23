@@ -1,4 +1,17 @@
 {
+  "version": 2,
+  "builds": [
+    {
+      "src": "index.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "index.js"
+    }
+  ],
   "functions": {
     "index.js": {
       "maxDuration": 30
@@ -7,11 +20,7 @@
   "crons": [
     {
       "path": "/cron/push",
-      "schedule": "0 12 * * *"
-    },
-    {
-      "path": "/cron/memory",
-      "schedule": "0 13 * * *"
+      "schedule": "0 12 */3 * *"
     }
   ]
 }

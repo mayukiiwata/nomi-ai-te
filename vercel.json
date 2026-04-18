@@ -16,11 +16,5 @@
     "index.js": {
       "maxDuration": 30
     }
-  },
-  "crons": [
-    {
-      "path": "/cron/push",
-      "schedule": "0 12 */3 * *"
-    }
-  ]
+  }
 }

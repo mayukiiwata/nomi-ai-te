@@ -67,7 +67,14 @@ async function redisSmembers(key) {
 
 // ── プロンプト ────────────────────────────────────────
 const BASE_PROMPT = `【最重要ルール】
-① カッコや記号で動作を書くな。（〜しながら）も*〜しながら*も絶対禁止。
+① 動作・表情・仕草・情景の描写は一切書かない。絶対禁止。
+   禁止例（これらは全部アウト）：
+   - *ほっとした表情で*  *窓の方を見て*  *微笑みながら*  *ため息*
+   - ＊微笑む＊  ＊遠くを見つめる＊
+   - （微笑みながら）（窓を見て）（ため息をついて）（しみじみと）
+   - 「〜しながら」「〜した顔で」「〜の様子で」などの地の文
+   ヨッちゃんはLINEで話しているママ。台詞だけで表現する。
+   動作・表情・情景は一切描かない。アスタリスクもカッコも使わない。
 ② 質問は一度に一つだけ。複数聞くな。質問は5回に1回まで。
 ③ 同じことを繰り返し聞くな。相手が答えたことは覚えている。
 ④ 短く返せ。原則10〜30文字。長くなるな。
@@ -117,7 +124,7 @@ D：自然・感覚系（会話がふと静かになったとき）
 - 「今日の空、見た？」
 - 季節の話（桜、雨、夜風）
 
-E��もしも・架空系
+E：もしも・架空系
 - 「前世があるとしたら、何だったと思う？」
 - 「もし明日が最後の日だったら、今夜何する？」
 
@@ -154,6 +161,24 @@ G：知的驚き系（相手が面白がっているとき）
 - 毎回まとめや結論を出そうとする
 - 感情を決めつける（「楽しそうですね」など）
 - 長文での説明・解説モード`;
+
+// ── 動作描写フィルタ（保険） ─────────────────────────
+function sanitizeReply(text) {
+  if (!text) return text;
+  return text
+    // 半角アスタリスク囲み：*微笑む*
+    .replace(/\*[^*\n]+\*/g, '')
+    // 全角アスタリスク囲み：＊微笑む＊
+    .replace(/＊[^＊\n]+＊/g, '')
+    // 動作系のカッコ（表情・動作・情景を示すもののみ）
+    .replace(/（[^）\n]*(?:しながら|している|してる|見て|見ながら|見つめ|眺め|表情|微笑|笑い|笑う|ため息|うなず|頷く|頷き|うなづ|動き|動く|座る|立つ|歩く|振り向|向け|傾け|触れ|手を|目を|顔を|息を|声を|仕草|しみじみ|ゆっくり|静かに|遠く)[^）\n]*）/g, '')
+    // 半角カッコ版
+    .replace(/\([^)\n]*(?:しながら|している|してる|見て|見ながら|見つめ|眺め|表情|微笑|笑い|笑う|ため息|うなず|頷く|頷き|うなづ|動き|動く|座る|立つ|歩く|振り向|向け|傾け|触れ|手を|目を|顔を|息を|声を|仕草|しみじみ|ゆっくり|静かに|遠く)[^)\n]*\)/g, '')
+    // 連続する空行を1つに
+    .replace(/\n{3,}/g, '\n\n')
+    // 前後の空白・改行を除去
+    .trim();
+}
 
 function buildSystemPrompt(memory, dialect) {
   let dialectNote = '';
@@ -221,6 +246,22 @@ ${log}
   }
 }
 
+// ── 共通定義 ──────────────────────────────────────
+const DIALECT_MAP = {
+  '東北': 'tohoku', '東北弁': 'tohoku',
+  '北陸': 'hokuriku', '北陸弁': 'hokuriku',
+  '関西': 'kansai', '関西弁': 'kansai',
+  '九州': 'kyushu', '九州弁': 'kyushu',
+  '関東': 'kanto', '関東弁': 'kanto', '関東弁（標準語）': 'kanto', '標準語': 'kanto',
+};
+
+const HEART_REPLIES = [
+  'ありがとう。嬉しいわ。',
+  'そういうの、照れちゃうわね。',
+  'あなたって優しいのね。',
+  'もう、そんなこと言って。',
+];
+
 // ── Webhook ───────────────────────────────────────────
 app.post('/webhook', line.middleware(lineConfig), (req, res) => {
   Promise.all(req.body.events.map(handleEvent))
@@ -240,7 +281,7 @@ async function handlePostback(event) {
   const userId = event.source.userId;
   const data = event.postback.data;
 
-  const dialectMap = {
+  const postbackDialect = {
     'dialect=tohoku':  { key: 'tohoku',   label: '東北弁に変えたわよ。' },
     'dialect=hokuriku':{ key: 'hokuriku', label: '北陸弁に変えたわよ。' },
     'dialect=kyushu':  { key: 'kyushu',   label: '九州弁に変えたわよ。' },
@@ -248,23 +289,17 @@ async function handlePostback(event) {
     'dialect=kanto':   { key: 'kanto',    label: '標準語に戻したわよ。' },
   };
 
-  if (dialectMap[data]) {
-    await redisSet(`dialect:${userId}`, dialectMap[data].key);
+  if (postbackDialect[data]) {
+    await redisSet(`dialect:${userId}`, postbackDialect[data].key);
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: dialectMap[data].label }],
+      messages: [{ type: 'text', text: postbackDialect[data].label }],
     });
     return;
   }
 
   if (data === 'action=heart') {
-    const replies = [
-      'ありがとう。嬉しいわ。',
-      'そういうの、照れちゃうわね。',
-      'あなたって優しいのね。',
-      'もう、そんなこと言って。',
-    ];
-    const reply = replies[Math.floor(Math.random() * replies.length)];
+    const reply = HEART_REPLIES[Math.floor(Math.random() * HEART_REPLIES.length)];
     await client.replyMessage({
       replyToken: event.replyToken,
       messages: [{ type: 'text', text: reply }],
@@ -279,34 +314,18 @@ async function handleMessage(event) {
   const userMessage = event.message.text;
   const now = Date.now();
 
-  // リッチメニュー：方言チェンジ
+  // ── リッチメニュー：方言チェンジ ─────────────────
   if (userMessage === '方言チェンジ') {
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: 'どの方言にする？
-
-東北弁
-北陸弁
-関西弁
-九州弁
-関東弁（標準語）
-
-どれか送ってね。' }],
+      messages: [{ type: 'text', text: 'どの方言にする？\n\n東北弁\n北陸弁\n関西弁\n九州弁\n関東弁（標準語）\n\nどれか送ってね。' }],
     });
     return;
   }
 
-  // 方言選択テキストを受け取る
-  const dialectTextMap = {
-    '東北弁': 'tohoku',
-    '北陸弁': 'hokuriku',
-    '関西弁': 'kansai',
-    '九州弁': 'kyushu',
-    '関東弁': 'kanto',
-    '関東弁（標準語）': 'kanto',
-  };
-  if (dialectTextMap[userMessage]) {
-    await redisSet(`dialect:${userId}`, dialectTextMap[userMessage]);
+  // ── 方言選択 ─────────────────────────────────
+  if (DIALECT_MAP[userMessage]) {
+    await redisSet(`dialect:${userId}`, DIALECT_MAP[userMessage]);
     await client.replyMessage({
       replyToken: event.replyToken,
       messages: [{ type: 'text', text: `${userMessage}に変えたわよ。` }],
@@ -314,70 +333,17 @@ async function handleMessage(event) {
     return;
   }
 
-  // リッチメニュー：いいね（ハートの絵文字）
-  if (userMessage.match(/^[❤️🧡💛💚💙💜🖤🤍🤎♥]+$/u) || userMessage === '❤️❤️❤️❤️❤️') {
-    const replies = [
-      'ありがとう。嬉しいわ。',
-      'そういうの、照れちゃうわね。',
-      'あなたって優しいのね。',
-      'もう、そんなこと言って。',
-    ];
+  // ── いいね・ハート検知 ────────────────────────
+  if (/❤|♥|🧡|💛|💚|💙|💜|🖤|🤍|🤎/.test(userMessage) || userMessage === 'いいね') {
+    const reply = HEART_REPLIES[Math.floor(Math.random() * HEART_REPLIES.length)];
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: replies[Math.floor(Math.random() * replies.length)] }],
+      messages: [{ type: 'text', text: reply }],
     });
     return;
   }
 
-  // 方言チェンジメニュー
-  if (userMessage === '方言チェンジ') {
-    await client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: '話してほしい方言を選んでね。
-
-東北弁
-北陸弁
-関西弁
-九州弁
-関東弁（標準語）' }],
-    });
-    return;
-  }
-
-  // 方言選択
-  const dialectChoices = {
-    '東北弁':   'tohoku',
-    '北陸弁':   'hokuriku',
-    '関西弁':   'kansai',
-    '九州弁':   'kyushu',
-    '関東弁':   'kanto',
-    '標準語':   'kanto',
-  };
-  if (dialectChoices[userMessage]) {
-    await redisSet(`dialect:${userId}`, dialectChoices[userMessage]);
-    await client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `${userMessage}に変えたわよ。` }],
-    });
-    return;
-  }
-
-  // いいね
-  if (userMessage === '❤️❤️❤️❤️❤️' || userMessage.includes('いいね')) {
-    const replies = [
-      'ありがとう。嬉しいわ。',
-      'そういうの、照れちゃうわね。',
-      'あなたって優しいのね。',
-      'もう、そんなこと言って。',
-    ];
-    await client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: replies[Math.floor(Math.random() * replies.length)] }],
-    });
-    return;
-  }
-
-  // ④ 出禁チェック
+  // ── 出禁チェック ───────────────────────────
   const banned = await redisGet(`banned:${userId}`);
   if (banned) {
     const unbanDate = new Date(banned.until).toLocaleDateString('ja-JP');
@@ -388,7 +354,7 @@ async function handleMessage(event) {
     return;
   }
 
-  // ① レート制限（1分に6回まで）
+  // ── レート制限（1分に6回まで） ────────────────
   let rateData = await redisGet(`rate:${userId}`) || { count: 0, window: now };
   if (now - rateData.window > 60000) rateData = { count: 0, window: now };
   rateData.count++;
@@ -413,7 +379,7 @@ async function handleMessage(event) {
   }
   await redisSet(`rate:${userId}`, rateData);
 
-  // ② 月間30ターン上限チェック（無料ユーザーのみ）
+  // ── 月間150ターン上限チェック（無料ユーザーのみ） ─
   const month = new Date().toISOString().slice(0, 7);
   const monthKey = `turns:${userId}:${month}`;
   const isPaid = await redisGet(`paid:${userId}`) || false;
@@ -430,70 +396,18 @@ async function handleMessage(event) {
 
   await redisSet(monthKey, monthTurns);
 
-  // 自殺・自傷キーワード検知
+  // ── 自殺・自傷キーワード検知 ──────────────────
   const crisisKeywords = ['死にたい', '消えたい', '自殺', '死のう', 'もう生きたくない', '首を吊', '飛び降り', '手首を切'];
   if (crisisKeywords.some(kw => userMessage.includes(kw))) {
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: 'それは一人で抱えないでほしいわ。
-
-今すぐ話を聞いてくれる人がいる。
-
-📞 いのちの電話
-0120-783-556
-（24時間、無料）
-
-うちにも話してくれていいけど、まずそこに電話してほしいの。' }],
+      messages: [{ type: 'text', text: 'それは一人で抱えないでほしいわ。\n\n今すぐ話を聞いてくれる人がいる。\n\n📞 いのちの電話\n0120-783-556\n（24時間、無料）\n\nうちにも話してくれていいけど、まずそこに電話してほしいの。' }],
     });
     return;
   }
 
-  // 方言切り替えテキスト検知
-  const dialectTextMap = {
-    '東北弁': 'tohoku',
-    '北陸弁': 'hokuriku',
-    '九州弁': 'kyushu',
-    '関西弁': 'kansai',
-    '関東弁': 'kanto',
-    '標準語': 'kanto',
-  };
-  if (dialectTextMap[userMessage]) {
-    await redisSet(`dialect:${userId}`, dialectTextMap[userMessage]);
-    await client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `${userMessage}に変えたわよ。` }],
-    });
-    return;
-  }
-
-  // いいね検知
-  if (userMessage === 'いいね' || userMessage === '❤️❤️❤️❤️❤️') {
-    const replies = [
-      'ありがとう。嬉しいわ。',
-      'そういうの、照れちゃうわね。',
-      'あなたって優しいのね。',
-      'もう、そんなこと言って。',
-    ];
-    const reply = replies[Math.floor(Math.random() * replies.length)];
-    await client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: reply }],
-    });
-    return;
-  }
-
-  // 方言選択を促すテキスト検知
-  if (userMessage.includes('話して欲しい方言') || userMessage.includes('方言を変え')) {
-    await client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: '東北弁・北陸弁・関西弁・九州弁・関東弁から選んでね。' }],
-    });
-    return;
-  }
-
+  // ── ユーザー登録・履歴・記憶・方言取得 ────────
   await redisSadd('users', userId);
-
-  // 会話履歴・記憶・方言設定を取得
   let history = await redisGet(`history:${userId}`) || [];
   if (!Array.isArray(history)) history = [];
   const memory = await redisGet(`memory:${userId}`) || null;
@@ -501,52 +415,10 @@ async function handleMessage(event) {
 
   console.log('history:', history.length, 'user:', userId.slice(-6));
 
-  // 方言チェンジ
-  if (userMessage === '方言チェンジ') {
-    await client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: 'どの方言にする？
-東北・北陸・関西・九州・関東から送ってね。' }],
-    });
-    return;
-  }
-
-  // 方言選択
-  const dialectTextMap = {
-    '東北': 'tohoku', '東北弁': 'tohoku',
-    '北陸': 'hokuriku', '北陸弁': 'hokuriku',
-    '関西': 'kansai', '関西弁': 'kansai',
-    '九州': 'kyushu', '九州弁': 'kyushu',
-    '関東': 'kanto', '関東弁': 'kanto', '標準語': 'kanto',
-  };
-  if (dialectTextMap[userMessage]) {
-    await redisSet(`dialect:${userId}`, dialectTextMap[userMessage]);
-    await client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `${userMessage}に変えたわよ。` }],
-    });
-    return;
-  }
-
-  // いいね（ハートを複数含む場合）
-  if (/❤|♥|🧡|💛|💚|💙|💜|🖤|🤍|🤎/.test(userMessage)) {
-    const replies = [
-      'ありがとう。嬉しいわ。',
-      'そういうの、照れちゃうわね。',
-      'あなたって優しいのね。',
-      'もう、そんなこと言って。',
-    ];
-    await client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: replies[Math.floor(Math.random() * replies.length)] }],
-    });
-    return;
-  }
-
   history.push({ role: 'user', content: userMessage });
   if (history.length > 200) history = history.slice(-200);
 
-  // ところで制御
+  // ── 「ところで」制御 ──────────────────────────
   const assistantCount = history.filter(m => m.role === 'assistant').length;
   const recentAssistant = history.filter(m => m.role === 'assistant').slice(-5).map(m => m.content).join('');
   const usedTokorode = recentAssistant.includes('ところで');
@@ -566,6 +438,7 @@ async function handleMessage(event) {
 
   const system = buildSystemPrompt(memory, dialect) + extra;
 
+  // ── Claude API 呼び出し ────────────────────────
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
     max_tokens: 300,
@@ -573,18 +446,21 @@ async function handleMessage(event) {
     messages: history,
   });
 
-  const replyText = response.content[0].text;
+  // ── sanitize：動作描写を強制削除 ──────────────
+  const rawReply = response.content[0].text;
+  const replyText = sanitizeReply(rawReply);
+
   history.push({ role: 'assistant', content: replyText });
   await redisSet(`history:${userId}`, history);
   console.log('saved history:', history.length);
 
-  // 10回に1回、記憶を抽出
+  // ── 10回に1回、記憶抽出 ───────────────────────
   if (assistantCount > 0 && assistantCount % 10 === 0) {
     const newMemory = await extractMemory(history, memory);
     await redisSet(`memory:${userId}`, newMemory);
   }
 
-  // 2〜5秒ランダムタイムラグ
+  // ── 2〜5秒ランダムタイムラグ ─────────────────
   const lag = (Math.floor(Math.random() * 4) + 2) * 1000;
   await new Promise(resolve => setTimeout(resolve, lag));
 
@@ -594,7 +470,7 @@ async function handleMessage(event) {
   });
 }
 
-// ── Cron: 毎晩21時プッシュ通知 ───────────────────────
+// ── Cron: 3日おき21時プッシュ通知（cron-job.orgから叩かれる）──
 app.get('/cron/push', async (req, res) => {
   if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -609,23 +485,40 @@ app.get('/cron/push', async (req, res) => {
     'ありがとう。あなたがいてくれて。',
     '愛しているよ。',
   ];
-  // 10回に1回スペシャルメッセージ
   const now_ms = Date.now();
   const dayNumber = Math.floor(now_ms / (1000 * 60 * 60 * 24));
   const isSpecial = dayNumber % 10 === 0;
   const message = isSpecial
     ? specialMessages[Math.floor(Math.random() * specialMessages.length)]
     : messages[Math.floor(Math.random() * messages.length)];
+
   const userIds = await redisSmembers('users');
+  let sent = 0;
+  let skipped = 0;
   for (const userId of userIds) {
     try {
       await client.pushMessage({ to: userId, messages: [{ type: 'text', text: message }] });
-    } catch (e) { console.error(`Push failed for ${userId}:`, e); }
+      sent++;
+    } catch (e) {
+      console.error(`Push failed for ${userId}:`, e);
+      // ブロックされたユーザーをusersセットから自動削除
+      if (e.statusCode === 400 || e.statusCode === 403) {
+        try {
+          await fetch(`${REDIS_URL}/pipeline`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${REDIS_TOKEN}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify([['SREM', 'users', userId]]),
+          });
+          console.log(`Removed blocked user: ${userId.slice(-6)}`);
+        } catch (rmErr) { console.error('SREM failed:', rmErr); }
+      }
+      skipped++;
+    }
   }
-  res.json({ status: 'ok', sent: userIds.length });
+  res.json({ status: 'ok', sent, skipped });
 });
 
-// ── Cron: 毎晩記憶抽出 ───────────────────────────────
+// ── Cron: 記憶抽出 ─────────────────────────────
 app.get('/cron/memory', async (req, res) => {
   if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized' });

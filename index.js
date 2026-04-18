@@ -420,10 +420,10 @@ async function handleMessage(event) {
   let monthTurns = await redisGet(monthKey) || 0;
   monthTurns++;
 
-  if (!isPaid && monthTurns > 30) {
+  if (!isPaid && monthTurns > 150) {
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: '今月の無料分（30回）を使い切ったわ。\n\n続けて話したい場合はライトプラン（月300円）かスタンダードプラン（月500円）にどうぞ。' }],
+      messages: [{ type: 'text', text: '今月の無料分を使い切ったわ。\n\n続けて話したい場合は管理者をせっついて。' }],
     });
     return;
   }
